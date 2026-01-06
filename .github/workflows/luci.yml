@@ -1,4 +1,4 @@
-name: Build Official OpenWrt 24.10 x86_64 Generic
+name: Build Official OpenWrt 24.10 luci
 
 on:
   workflow_dispatch:
