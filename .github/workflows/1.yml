@@ -1,7 +1,7 @@
-name: Build OpenWrt 24.10 1
+name: Build OpenWrt 24.10 x86_64
 
 on:
-  workflow_dispatch: # 手动触发编译
+  workflow_dispatch:
 
 env:
   REPO_URL: https://github.com/openwrt/openwrt
@@ -17,7 +17,7 @@ jobs:
     - name: 检查分支
       uses: actions/checkout@v4
 
-    - name: 彻底清理磁盘空间 (避免空间不足报错)
+    - name: 彻底清理磁盘空间
       uses: jlumbroso/free-disk-space@main
       with:
         tool-cache: true
@@ -37,7 +37,7 @@ jobs:
       run: |
         git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
 
-    - name: 添加第三方插件源 (kenzo & small)
+    - name: 添加第三方插件源 (PassWall & Apps)
       run: |
         cd openwrt
         echo "src-git kenzo https://github.com/kenzok8/openwrt-packages" >> feeds.conf.default
@@ -48,31 +48,69 @@ jobs:
     - name: 注入完整配置 (.config)
       run: |
         cd openwrt
-        # 1. 强制启用 LuCI Web 界面及中文环境
+        # 1. 强制启用 LuCI 界面及中文
         echo "CONFIG_PACKAGE_luci=y" >> .config
         echo "CONFIG_LUCI_LANG_zh_Hans=y" >> .config
         echo "CONFIG_PACKAGE_luci-i18n-base-zh-cn=y" >> .config
         
-        # 2. 基础架构与 GRUB (x86_64 专用)
+        # 2. Target 架构 (x86_64)
         echo "CONFIG_TARGET_x86=y" >> .config
         echo "CONFIG_TARGET_x86_64=y" >> .config
         echo "CONFIG_TARGET_x86_64_DEVICE_generic=y" >> .config
         echo "CONFIG_GRUB_IMAGES=y" >> .config
         echo "CONFIG_GRUB_EFI_IMAGES=y" >> .config
         
-        # 3. 插件：ADG, SmartDNS, DDNS, 多拨
+        # 3. 网络插件 (多拨/DNS/广告拦截)
         echo "CONFIG_PACKAGE_luci-app-adguardhome=y" >> .config
         echo "CONFIG_PACKAGE_luci-app-smartdns=y" >> .config
         echo "CONFIG_PACKAGE_luci-app-ddns=y" >> .config
         echo "CONFIG_PACKAGE_ddns-scripts-cloudflare=y" >> .config
         echo "CONFIG_PACKAGE_luci-app-syncdial=y" >> .config
         echo "CONFIG_PACKAGE_luci-app-mwan3=y" >> .config
+
+        # 4. PassWall 客户端及服务端
+        echo "CONFIG_PACKAGE_luci-app-passwall=y" >> .config
+        echo "CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Xray=y" >> .config
+        echo "CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Shadowsocks_Libev_Client=y" >> .config
+        echo "CONFIG_PACKAGE_luci-app-passwall_INCLUDE_ShadowsocksR_Libev_Client=y" >> .config
+        echo "CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Trojan_Plus=y" >> .config
+        echo "CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Shadowsocks_Libev_Server=y" >> .config
+        echo "CONFIG_PACKAGE_luci-app-passwall_INCLUDE_ShadowsocksR_Libev_Server=y" >> .config
         
-        # 4. 驱动：常见网卡驱动
+        # 5. 网卡驱动
         echo "CONFIG_PACKAGE_kmod-e1000=y" >> .config
         echo "CONFIG_PACKAGE_kmod-e1000e=y" >> .config
         echo "CONFIG_PACKAGE_kmod-igb=y" >> .config
         echo "CONFIG_PACKAGE_kmod-r8169=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-usb-net=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-usb-net-asix=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-usb-net-as
+        echo "CONFIG_PACKAGE_kmod-usb-net-rtl8152=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb-net-asix-ax88179=y" >> .config
+        
+        # 6. 全部语言包汉化
+        echo "CONFIG_PACKAGE_luci-i18n-adguardhome-zh-cn=y" >> .config
+        echo "CONFIG_PACKAGE_luci-i18n-smartdns-zh-cn=y" >> .config
+        echo "CONFIG_PACKAGE_luci-i18n-ddns-zh-cn=y" >> .config
+        echo "CONFIG_PACKAGE_luci-i18n-syncdial-zh-cn=y" >> .config
+        echo "CONFIG_PACKAGE_luci-i18n-mwan3-zh-cn=y" >> .config
+        echo "CONFIG_PACKAGE_luci-i18n-passwall-zh-cn=y" >> .config
+        
+        make defconfig
+
+    - name: 预下载依赖
+      run: |
+        cd openwrt
+        make download -j8
+        find dl -size -1024c -exec ls -l {} \;
+        find dl -size -1024c -exec rm -f {} \;
+
+    - name: 开始编译
+      run: |
+        cd openwrt
+        make -j$(nproc) || make -j1 V=s
+
+    - name: 整理文件并上传
+      uses: actions/upload-artifact@v4
+      with:
+        name: OpenWrt_x86_64_24.10_PassWall_Server
+        path: |
+          openwrt/bin/targets/x86/64/*combined-efi.img.gz
+          openwrt/bin/targets/x86/64/*generic-rootfs.tar.gz
