@@ -1,0 +1,79 @@
+name: Build OpenWrt 24.10 x86_64-512M
+
+on:
+  workflow_dispatch: 
+
+env:
+  REPO_URL: https://github.com/openwrt/openwrt
+  REPO_BRANCH: openwrt-24.10
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: 检查分支
+      uses: actions/checkout@v4
+
+    - name: 彻底清理磁盘空间 (避免 Code 2)
+      uses: jlumbroso/free-disk-space@main
+      with:
+        tool-cache: true
+        android: true
+        dotnet: true
+        haskell: true
+        swap: true
+
+    - name: 安装编译依赖
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential clang flex g++ gawk gcc-multilib gettext \
+        git libncurses5-dev libssl-dev python3-distutils rsync unzip zlib1g-dev swig libpython3-dev
+
+    - name: 克隆源码
+      run: |
+        git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
+
+    - name: 添加第三方插件源 (ADG, SmartDNS, SyncDial)
+      run: |
+        cd openwrt
+        echo "src-git kenzo https://github.com/kenzok8/openwrt-packages" >> feeds.conf.default
+        echo "src-git small https://github.com/kenzok8/small" >> feeds.conf.default
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+
+    - name: 注入完整配置
+      run: |
+        cd openwrt
+        # 基础架构与 GRUB
+        echo "CONFIG_TARGET_x86=y" >> .config
+        echo "CONFIG_TARGET_x86_64=y" >> .config
+        echo "CONFIG_TARGET_x86_64_DEVICE_generic=y" >> .config
+        echo "CONFIG_GRUB_IMAGES=y" >> .config
+        echo "CONFIG_GRUB_EFI_IMAGES=y" >> .config
+        
+        # 分区大小设置：内核16M，根分区(软件空间)512M
+        echo "CONFIG_TARGET_KERNEL_PARTSIZE=16" >> .config
+        echo "CONFIG_TARGET_ROOTFS_PARTSIZE=512" >> .config
+        
+        # 插件: ADG, SmartDNS, Cloudflare DDNS, 多拨
+        echo "CONFIG_PACKAGE_luci-app-adguardhome=y" >> .config
+        echo "CONFIG_PACKAGE_luci-app-smartdns=y" >> .config
+        echo "CONFIG_PACKAGE_luci-app-ddns=y" >> .config
+        echo "CONFIG_PACKAGE_ddns-scripts-cloudflare=y" >> .config
+        echo "CONFIG_PACKAGE_luci-app-syncdial=y" >> .config
+        echo "CONFIG_PACKAGE_luci-app-mwan3=y" >> .config
+        
+        # 驱动: Intel E1000/E1000E/IGB & USB 网卡
+        echo "CONFIG_PACKAGE_kmod-e1000=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-e1000e=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-igb=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb-net=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb-net-asix=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb-net-asix-ax88179=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb-net-rtl8152=y" >> .config
+        
+        # 语言包
+        echo "CONFIG_PACKAGE_luci-i18n-base-zh-cn=y" >> .config
+        echo "CONFIG_PACKAGE_luci-i18n-adguardhome-zh-cn=y" >> .config
+        echo "CONFIG_PACKAGE
