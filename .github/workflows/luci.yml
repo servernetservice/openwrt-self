@@ -1,4 +1,4 @@
-name: Build Official OpenWrt 24.10 luci
+name: Build Official OpenWrt 24.10 x86_64 Generic
 
 on:
   workflow_dispatch:
@@ -78,4 +78,40 @@ jobs:
         echo "CONFIG_PACKAGE_luci-i18n-smartdns-zh-cn=y" >> .config
         echo "CONFIG_PACKAGE_luci-app-mwan3=y" >> .config
         echo "CONFIG_PACKAGE_luci-i18n-mwan3-zh-cn=y" >> .config
-        echo "CONFIG_PACKAGE_luci-app-
+        echo "CONFIG_PACKAGE_luci-app-syncdial=y" >> .config
+        
+        make defconfig
+
+    - name: 下载依赖
+      run: |
+        cd openwrt
+        make download -j8 || true
+        find dl -size -1024c -exec rm -f {} \;
+        make download -j1 V=s
+
+    - name: 编译固件 (严格分段执行)
+      run: |
+        cd openwrt
+        # 1. 编译宿主机工具
+        make tools/install -j$(nproc)
+        make toolchain/install -j$(nproc)
+        # 2. 编译内核驱动 (多线程)
+        make target/compile -j$(nproc)
+        # 3. 软件阶段 (单线程 V=s 确保 Web 界面被编译成功)
+        make package/compile -j1 V=s || true
+        make package/install -j1 V=s || true
+        make target/install -j1 V=s || true
+
+    - name: 整理并上传固件
+      if: always()
+      run: |
+        mkdir -p ./artifact
+        find openwrt/bin/targets/x86/64/ -name "*combined*.img.gz" -exec cp {} ./artifact/ \;
+        echo "--- 最终镜像清单 ---"
+        ls -lh ./artifact/
+
+    - name: 上传固件至 GitHub Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: OpenWrt_24.10_Official_WebUI
+        path: ./artifact/*.img.gz
