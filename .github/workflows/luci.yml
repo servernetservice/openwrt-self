@@ -1,0 +1,81 @@
+name: Build Official OpenWrt 24.10 luci
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: 检查环境
+      uses: actions/checkout@v4
+
+    - name: 彻底清理磁盘空间 (避免 Code 2/No space)
+      uses: jlumbroso/free-disk-space@main
+      with:
+        tool-cache: true
+        android: true
+        dotnet: true
+        haskell: true
+        swap-storage: true
+
+    - name: 安装编译依赖
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib gettext \
+        git libncurses5-dev libssl-dev python3-distutils rsync unzip zlib1g-dev swig libpython3-dev \
+        libelf-dev qemu-utils
+
+    - name: 克隆源码 (24.10)
+      run: |
+        git clone --depth 1 https://github.com/openwrt/openwrt -b openwrt-24.10 openwrt
+
+    - name: 添加源并解决冲突 (解决 Multiple packages define)
+      run: |
+        cd openwrt
+        # 1. 注入源
+        echo "src-git passwall_packages https://github.com/xiaorouji/openwrt-passwall-packages.git;main" >> feeds.conf.default
+        echo "src-git passwall_luci https://github.com/xiaorouji/openwrt-passwall.git;main" >> feeds.conf.default
+        echo "src-git kenzo https://github.com/kenzok8/openwrt-packages" >> feeds.conf.default
+        echo "src-git small https://github.com/kenzok8/small" >> feeds.conf.default
+        
+        ./scripts/feeds update -a
+        
+        # 2. 暴力清理：官方版编译最怕源冲突，删除重复项确保 LuCI 路径正确
+        rm -rf feeds/kenzo/luci-app-passwall
+        rm -rf feeds/kenzo/luci-app-smartdns
+        rm -rf feeds/kenzo/luci-app-adguardhome
+        rm -rf feeds/small/luci-app-passwall
+        rm -rf feeds/small/luci-app-smartdns
+        
+        ./scripts/feeds install -a
+
+    - name: 注入配置 (强制 Web/IPv6/1G)
+      run: |
+        cd openwrt
+        # --- 核心架构 ---
+        echo "CONFIG_TARGET_x86=y" >> .config
+        echo "CONFIG_TARGET_x86_64=y" >> .config
+        echo "CONFIG_TARGET_x86_64_DEVICE_generic=y" >> .config
+        
+        # --- 开启 Web 界面 (核心) ---
+        echo "CONFIG_PACKAGE_luci=y" >> .config
+        echo "CONFIG_PACKAGE_luci-ssl=y" >> .config
+        echo "CONFIG_PACKAGE_luci-i18n-base-zh-cn=y" >> .config
+        echo "CONFIG_PACKAGE_luci-theme-bootstrap=y" >> .config
+        
+        # --- 磁盘与 IPv6 ---
+        echo "CONFIG_TARGET_KERNEL_PARTSIZE=64" >> .config
+        echo "CONFIG_TARGET_ROOTFS_PARTSIZE=1536" >> .config
+        echo "CONFIG_PACKAGE_ipv6helper=y" >> .config
+        
+        # --- 插件集成 (带中文) ---
+        echo "CONFIG_PACKAGE_luci-app-passwall=y" >> .config
+        echo "CONFIG_PACKAGE_luci-app-adguardhome=y" >> .config
+        echo "CONFIG_PACKAGE_luci-i18n-adguardhome-zh-cn=y" >> .config
+        echo "CONFIG_PACKAGE_luci-app-smartdns=y" >> .config
+        echo "CONFIG_PACKAGE_luci-i18n-smartdns-zh-cn=y" >> .config
+        echo "CONFIG_PACKAGE_luci-app-mwan3=y" >> .config
+        echo "CONFIG_PACKAGE_luci-i18n-mwan3-zh-cn=y" >> .config
+        echo "CONFIG_PACKAGE_luci-app-
